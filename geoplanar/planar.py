@@ -205,7 +205,7 @@ def check_validity(gdf):
     gdfv = gdf.copy()
     sirs = self_intersecting_rings(gdf)
     if sirs:
-        for i in self_intersecting_rings(gdf):
+        for i in sirs:
             fixed_i = fix_self_intersecting_ring(gdfv.geometry.iloc[i])
             gdfv.geometry.iloc[i] = fixed_i
 
