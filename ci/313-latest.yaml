@@ -1,0 +1,13 @@
+name: geoplanar-313-latest
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  - libpysal
+  - esda
+  - packaging
+  - pytest
+  - pytest-cov
+  - codecov
+  - pip
+  - geopandas
