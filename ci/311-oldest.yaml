@@ -4,7 +4,7 @@ channels:
 dependencies:
   - python=3.11
   - libpysal=4.10.0
-  - geopandas=0.10.2
+  - geopandas=0.14.4
   - scipy=1.12
   - pandas=2,2
   - esda
