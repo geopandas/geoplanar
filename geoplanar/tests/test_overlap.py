@@ -11,6 +11,7 @@ from geoplanar.overlap import (
     is_overlapping,
     merge_overlaps,
     merge_touching,
+    split_overlaps,
     trim_overlaps,
 )
 
@@ -80,6 +81,30 @@ class TestOverlap:
     def test_merge_overlaps_multiple(self):
         gdf1 = merge_overlaps(self.gdf2, 10, 0)
         assert_equal(gdf1.area.values, numpy.array([200]))
+
+    def test_split_overlaps(self):
+        gdf = geopandas.GeoDataFrame(
+            {"label": ["large", "small"]}, geometry=[self.p1, self.p2]
+        )
+        split = split_overlaps(gdf)
+
+        assert_equal(split.area.values, numpy.array([96.0, 4.0, 4.0]))
+        assert split.loc[2, "label"] == "small"
+        assert not is_overlapping(split)
+
+    def test_split_overlaps_values_from_larger(self):
+        gdf = geopandas.GeoDataFrame(
+            {"label": ["large", "small"]}, geometry=[self.p1, self.p2]
+        )
+        split = split_overlaps(gdf, values_from="larger")
+
+        assert split.loc[2, "label"] == "large"
+
+    def test_split_overlaps_threshold(self):
+        split = split_overlaps(self.gdf, min_overlap_area=5)
+
+        assert_equal(split.area.values, numpy.array([100.0, 8.0]))
+        assert is_overlapping(split)
 
 
 class TestTouching:
