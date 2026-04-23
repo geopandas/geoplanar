@@ -4,8 +4,9 @@ from collections import defaultdict
 import geopandas
 import libpysal
 import numpy as np
-from packaging.version import Version
+import shapely
 from esda.shape import isoperimetric_quotient
+from packaging.version import Version
 
 __all__ = [
     "overlaps",
@@ -29,11 +30,21 @@ def overlaps(gdf):
     array-like: Pairs of indices with overlapping geometries.
     """
     if GPD_GE_014:
-        return gdf.sindex.query(gdf.geometry, predicate="overlaps")
-    return gdf.sindex.query_bulk(gdf.geometry, predicate="overlaps")
+        overlaps = gdf.sindex.query(gdf.geometry, predicate="overlaps")
+    else:
+        overlaps = gdf.sindex.query_bulk(gdf.geometry, predicate="overlaps")
+
+    # predicate occasionally marks pairs as overlapping if their intersection is a
+    # 1-d multipart geometry. Filter those out.
+    dimension = shapely.get_dimensions(
+        gdf.geometry.iloc[overlaps[0]].intersection(
+            gdf.geometry.iloc[overlaps[1]], align=False
+        )
+    )
+    return overlaps.T[dimension == 2].T
 
 
-def trim_overlaps(gdf, strategy='largest', inplace=False):
+def trim_overlaps(gdf, strategy="largest", inplace=False):
     """Trim overlapping polygons
 
     Note
@@ -54,13 +65,17 @@ def trim_overlaps(gdf, strategy='largest', inplace=False):
           - 'compact' : Trim the polygon yielding the most compact modified polygon.
                             (isoperimetric quotient).
           - None      : Trim either polygon non-deterministically but performantly.
-    
+
     Returns
     -------
 
     gdf: geodataframe with corrected geometries
 
     """
+
+    # TODO: difference may hit floating point precision and still result in overlappign
+    # geometries. In that case, fix_npe_edges fails.
+
     if GPD_GE_014:
         intersections = gdf.sindex.query(gdf.geometry, predicate="overlaps").T
     else:
@@ -77,7 +92,7 @@ def trim_overlaps(gdf, strategy='largest', inplace=False):
                 left = gdf.geometry.iloc[i]
                 right = gdf.geometry.iloc[j]
                 gdf.iloc[j, geom_col_idx] = right.difference(left)
-    elif strategy=='largest':
+    elif strategy == "largest":
         for i, j in intersections:
             if i != j:
                 left = gdf.geometry.iloc[i]
@@ -86,7 +101,7 @@ def trim_overlaps(gdf, strategy='largest', inplace=False):
                     gdf.iloc[i, geom_col_idx] = left.difference(right)
                 else:
                     gdf.iloc[j, geom_col_idx] = right.difference(left)
-    elif strategy=='smallest':
+    elif strategy == "smallest":
         for i, j in intersections:
             if i != j:
                 left = gdf.geometry.iloc[i]
@@ -95,19 +110,19 @@ def trim_overlaps(gdf, strategy='largest', inplace=False):
                     gdf.iloc[i, geom_col_idx] = left.difference(right)
                 else:
                     gdf.iloc[j, geom_col_idx] = right.difference(left)
-    elif strategy=='compact':
-         for i, j in intersections:
-             if i != j:
-                 left = gdf.geometry.iloc[i]
-                 right = gdf.geometry.iloc[j]
-                 left_c = left.difference(right)
-                 right_c = right.difference(left)
-                 iq_left = isoperimetric_quotient(left_c)
-                 iq_right = isoperimetric_quotient(right_c)
-                 if iq_left > iq_right:  # trimming left is more compact than right
-                     gdf.iloc[i, geom_col_idx] = left_c
-                 else:
-                     gdf.iloc[j, geom_col_idx] = right_c
+    elif strategy == "compact":
+        for i, j in intersections:
+            if i != j:
+                left = gdf.geometry.iloc[i]
+                right = gdf.geometry.iloc[j]
+                left_c = left.difference(right)
+                right_c = right.difference(left)
+                iq_left = isoperimetric_quotient(left_c)
+                iq_right = isoperimetric_quotient(right_c)
+                if iq_left > iq_right:  # trimming left is more compact than right
+                    gdf.iloc[i, geom_col_idx] = left_c
+                else:
+                    gdf.iloc[j, geom_col_idx] = right_c
     return gdf
 
 

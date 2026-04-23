@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import geopandas
-import numpy
+import numpy as np
 import pandas
+import shapely
 from libpysal.graph import Graph
 from shapely import (
     GeometryCollection,
@@ -127,8 +128,9 @@ def fix_npe_edges(gdf, inplace=False):
         gdf = gdf.copy()
 
     edges = non_planar_edges(gdf)
-    unique_edges = edges.adjacency[
-        ~pandas.DataFrame(numpy.sort(edges.adjacency.index.to_frame(), axis=1))
+    adjacency = edges.adjacency[edges.adjacency != 0]  # drop isolates
+    unique_edges = adjacency[
+        ~pandas.DataFrame(np.sort(adjacency.index.to_frame(), axis=1))
         .duplicated()
         .values
     ].index
@@ -147,15 +149,50 @@ def insert_intersections(poly_a, poly_b):
     on intersecting edges
     """
     overlapping_msg = (
-        "Polygons are overlapping. Fix overlaps before fixing nonplanar edges."
+        "Polygons at {} are overlapping. Fix overlaps before fixing nonplanar edges."
     )
     pint = poly_a.intersection(poly_b)
     if isinstance(pint, LineString | MultiLineString | GeometryCollection):
         if isinstance(pint, GeometryCollection):
             for geom in pint.geoms:
                 if isinstance(geom, Polygon | MultiPolygon):
-                    raise ValueError(overlapping_msg)
-        return poly_a.union(pint), poly_b.union(pint)
+                    raise ValueError(overlapping_msg.format(geom.centroid))
+
+        # Get all the coordinates and their locations along the line, sort and construct
+        # a new polygon. Note that this only considers exterior. If there are non-planar
+        # edges in the interior, it is currently not fixed by this routine.
+
+        pint = poly_a.intersection(poly_b)
+        pint_coords = shapely.get_coordinates(pint)
+        pint_points = shapely.points(pint_coords)
+
+        # adapt poly_a
+        orig_coords = shapely.get_coordinates(poly_a)[:-1]
+        orig_points = shapely.points(orig_coords)
+
+        if not np.isin(pint_points, orig_points).all():
+            pint_distances = shapely.line_locate_point(poly_a.exterior, pint_points)
+            orig_distances = shapely.line_locate_point(poly_a.exterior, orig_points)
+            all_distances = np.concat([pint_distances, orig_distances])
+            all_coords = np.concat([pint_coords, orig_coords])
+            poly_a = shapely.Polygon(
+                all_coords[np.argsort(all_distances)], holes=poly_a.interiors
+            )
+
+        # adapt poly_b
+        orig_coords = shapely.get_coordinates(poly_b)[:-1]
+        orig_points = shapely.points(orig_coords)
+
+        if not np.isin(pint_points, orig_points).all():
+            pint_distances = shapely.line_locate_point(poly_b.exterior, pint_points)
+            orig_distances = shapely.line_locate_point(poly_b.exterior, orig_points)
+            all_distances = np.concat([pint_distances, orig_distances])
+            all_coords = np.concat([pint_coords, orig_coords])
+            poly_b = shapely.Polygon(
+                all_coords[np.argsort(all_distances)], holes=poly_b.interiors
+            )
+        return poly_a, poly_b
+
     elif isinstance(pint, Point | MultiPoint):
         new_polys = []
         for poly in [poly_a, poly_b]:
@@ -175,15 +212,14 @@ def insert_intersections(poly_a, poly_b):
                 exterior = LineString(list(poly.exterior.coords))
                 splits = split(exterior, pint).geoms
                 if len(splits) > 1:
-                    left, right = splits
-                    exterior = linemerge([left, right])
+                    exterior = linemerge(splits)
                     new_poly = Polygon(exterior)
                     new_polys.append(Polygon(new_poly))
                 else:
                     new_polys.append(poly)
         return new_polys
     else:  # intersection is Polygon
-        raise ValueError(overlapping_msg)
+        raise ValueError(overlapping_msg.format(pint.centroid))
 
 
 def self_intersecting_rings(gdf):

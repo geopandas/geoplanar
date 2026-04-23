@@ -4,11 +4,12 @@ import os.path
 import geopandas
 import numpy
 import pytest
-from numpy.testing import assert_equal
+from geopandas.testing import assert_geodataframe_equal
+from numpy.testing import assert_equal, assert_array_almost_equal
 from packaging.version import Version
 from shapely.geometry import Polygon, box
 
-from geoplanar import fill_gaps, gaps, snap
+from geoplanar import fill_gaps, gaps, non_planar_edges, snap
 
 HERE = os.path.abspath(os.path.dirname(__file__))
 PACKAGE_DIR = os.path.dirname(os.path.dirname(HERE))
@@ -36,7 +37,7 @@ class TestGap:
         assert_equal(gdf1.area.values, numpy.array([108.0, 32.0]))
 
     def test_fill_gaps_smallest(self):
-        gdf1 = fill_gaps(self.gdf, strategy='smallest')
+        gdf1 = fill_gaps(self.gdf, strategy="smallest")
         assert_equal(gdf1.area.values, numpy.array([100.0, 40.0]))
 
     def test_fill_gaps_none(self):
@@ -106,3 +107,29 @@ class TestSnap:
         )
         snapped = snap(df, 0.5)
         assert snapped.is_valid.all()
+
+    def test_corner_touch(self):
+        p1 = Polygon([[0, 0], [10, 0], [10, 10], [0, 10]])
+        p2 = Polygon([(10, 10), (20, 10), (20, 20), (10, 20)])
+        gdf = geopandas.GeoDataFrame(geometry=[p2, p1])
+
+        gdf2 = snap(gdf, threshold=8)
+
+        # we detect corners as 'maybe snap' but nothing should happen
+        assert_geodataframe_equal(gdf, gdf2)
+
+    def test_skewed(self):
+        p1 = Polygon([[0, 0], [9.9, 0], [10.1, 10], [0, 10]])
+        p2 = Polygon([(11, 2), (21, 2), (21, 8), (11, 8)])
+
+        # one direction
+        gdf = geopandas.GeoDataFrame(geometry=[p1, p2])
+        gdf1 = snap(gdf, 1.5)
+        assert len(non_planar_edges(gdf1)) == 0
+        assert_array_almost_equal(gdf1.area, [108, 60])
+
+        # other direction
+        gdf = geopandas.GeoDataFrame(geometry=[p2, p1])
+        gdf1 = snap(gdf, 1.5)
+        assert len(non_planar_edges(gdf1)) == 0
+        assert_array_almost_equal(gdf1.area, [66.076427, 100])
