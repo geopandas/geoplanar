@@ -4,12 +4,14 @@ from collections import defaultdict
 import geopandas
 import libpysal
 import numpy as np
+import pandas as pd
 from packaging.version import Version
 from esda.shape import isoperimetric_quotient
 
 __all__ = [
     "overlaps",
     "trim_overlaps",
+    "isolate_overlaps",
     "is_overlapping",
     "merge_overlaps",
     "merge_touching",
@@ -33,7 +35,7 @@ def overlaps(gdf):
     return gdf.sindex.query_bulk(gdf.geometry, predicate="overlaps")
 
 
-def trim_overlaps(gdf, strategy='largest', inplace=False):
+def trim_overlaps(gdf, strategy="largest", inplace=False):
     """Trim overlapping polygons
 
     Note
@@ -54,7 +56,7 @@ def trim_overlaps(gdf, strategy='largest', inplace=False):
           - 'compact' : Trim the polygon yielding the most compact modified polygon.
                             (isoperimetric quotient).
           - None      : Trim either polygon non-deterministically but performantly.
-    
+
     Returns
     -------
 
@@ -77,7 +79,7 @@ def trim_overlaps(gdf, strategy='largest', inplace=False):
                 left = gdf.geometry.iloc[i]
                 right = gdf.geometry.iloc[j]
                 gdf.iloc[j, geom_col_idx] = right.difference(left)
-    elif strategy=='largest':
+    elif strategy == "largest":
         for i, j in intersections:
             if i != j:
                 left = gdf.geometry.iloc[i]
@@ -86,7 +88,7 @@ def trim_overlaps(gdf, strategy='largest', inplace=False):
                     gdf.iloc[i, geom_col_idx] = left.difference(right)
                 else:
                     gdf.iloc[j, geom_col_idx] = right.difference(left)
-    elif strategy=='smallest':
+    elif strategy == "smallest":
         for i, j in intersections:
             if i != j:
                 left = gdf.geometry.iloc[i]
@@ -95,20 +97,100 @@ def trim_overlaps(gdf, strategy='largest', inplace=False):
                     gdf.iloc[i, geom_col_idx] = left.difference(right)
                 else:
                     gdf.iloc[j, geom_col_idx] = right.difference(left)
-    elif strategy=='compact':
-         for i, j in intersections:
-             if i != j:
-                 left = gdf.geometry.iloc[i]
-                 right = gdf.geometry.iloc[j]
-                 left_c = left.difference(right)
-                 right_c = right.difference(left)
-                 iq_left = isoperimetric_quotient(left_c)
-                 iq_right = isoperimetric_quotient(right_c)
-                 if iq_left > iq_right:  # trimming left is more compact than right
-                     gdf.iloc[i, geom_col_idx] = left_c
-                 else:
-                     gdf.iloc[j, geom_col_idx] = right_c
+    elif strategy == "compact":
+        for i, j in intersections:
+            if i != j:
+                left = gdf.geometry.iloc[i]
+                right = gdf.geometry.iloc[j]
+                left_c = left.difference(right)
+                right_c = right.difference(left)
+                iq_left = isoperimetric_quotient(left_c)
+                iq_right = isoperimetric_quotient(right_c)
+                if iq_left > iq_right:  # trimming left is more compact than right
+                    gdf.iloc[i, geom_col_idx] = left_c
+                else:
+                    gdf.iloc[j, geom_col_idx] = right_c
     return gdf
+
+
+def isolate_overlaps(gdf, min_overlap_area=0, values_from="smaller"):
+    """Isolate large overlaps into standalone geometries.
+
+    For each overlapping pair whose shared area is at least ``min_overlap_area``,
+    the overlap is removed from both input geometries and appended as a new geometry.
+
+    Notes
+    -----
+    The original index is not preserved.
+
+    Parameters
+    ----------
+    gdf : GeoDataFrame
+        GeoDataFrame with polygon geometries.
+    min_overlap_area : float, default 0
+        Minimum overlap area required to isolate as a new geometry. Smaller overlaps are
+        left untouched as it is expected that those will be resolved by other functions
+        like :func:`trim_overlaps` or :func:`merge_overlaps`.
+    values_from : {"smaller", "larger"}, default "smaller"
+        Choose which of the two overlapping polygons provides the attribute values
+        for the new overlap geometry.
+
+    Returns
+    -------
+    GeoDataFrame
+        GeoDataFrame with trimmed original geometries and appended overlap parts.
+    """
+    if values_from not in {"smaller", "larger"}:
+        raise ValueError("values_from must be either 'smaller' or 'larger'")
+
+    if GPD_GE_014:
+        intersections = gdf.sindex.query(gdf.geometry, predicate="overlaps").T
+    else:
+        intersections = gdf.sindex.query_bulk(gdf.geometry, predicate="overlaps").T
+
+    result = gdf.copy()
+    geom_col = result.geometry.name
+    geom_col_idx = result.columns.get_loc(geom_col)
+    seen = set()
+    unique_pairs = []
+
+    for i, j in intersections:
+        if i == j:
+            continue
+        pair = tuple(sorted((i, j)))
+        if pair not in seen:
+            seen.add(pair)
+            unique_pairs.append(pair)
+
+    overlap_rows = []
+
+    for i, j in unique_pairs:
+        left = result.geometry.iloc[i]
+        right = result.geometry.iloc[j]
+        overlap = left.intersection(right)
+
+        if overlap.is_empty or overlap.area < min_overlap_area:
+            continue
+
+        result.iloc[i, geom_col_idx] = left.difference(overlap)
+        result.iloc[j, geom_col_idx] = right.difference(overlap)
+
+        source_idx = i if gdf.geometry.iloc[i].area <= gdf.geometry.iloc[j].area else j
+        if values_from == "larger":
+            source_idx = j if source_idx == i else i
+
+        overlap_row = gdf.iloc[source_idx].copy()
+        overlap_row[geom_col] = overlap
+        overlap_rows.append(overlap_row)
+
+    if not overlap_rows:
+        return result
+
+    overlap_gdf = geopandas.GeoDataFrame(
+        overlap_rows, columns=result.columns, geometry=geom_col, crs=result.crs
+    )
+    combined = pd.concat([result, overlap_gdf], ignore_index=True)
+    return geopandas.GeoDataFrame(combined)
 
 
 def is_overlapping(gdf):

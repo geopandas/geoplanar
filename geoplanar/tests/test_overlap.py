@@ -11,6 +11,7 @@ from geoplanar.overlap import (
     is_overlapping,
     merge_overlaps,
     merge_touching,
+    isolate_overlaps,
     trim_overlaps,
 )
 
@@ -36,16 +37,18 @@ class TestOverlap:
         assert_equal(gdf1.area.values, numpy.array([96.0, 8.0]))
 
     def test_trim_overlaps_smallest(self):
-        gdf1 = trim_overlaps(self.gdf, strategy='smallest')
+        gdf1 = trim_overlaps(self.gdf, strategy="smallest")
         assert_equal(gdf1.area.values, numpy.array([100.0, 4.0]))
 
     def test_trim_overlaps_random(self):
         gdf1 = trim_overlaps(self.gdf, strategy=None)
         assert_equal(gdf1.area.values, numpy.array([100.0, 4.0]))
 
-    @pytest.mark.skipif(Version(geopandas.__version__) == Version("0.10.2"), reason="Missing pygeos")    
+    @pytest.mark.skipif(
+        Version(geopandas.__version__) == Version("0.10.2"), reason="Missing pygeos"
+    )
     def test_trim_overlaps_multiple(self):
-        gdf1 = trim_overlaps(self.gdf2, strategy='largest')
+        gdf1 = trim_overlaps(self.gdf2, strategy="largest")
         assert_equal(gdf1.area.values, numpy.array([96, 96.0, 8.0]))
 
         gdf1 = trim_overlaps(self.gdf2, strategy=None)
@@ -54,10 +57,10 @@ class TestOverlap:
         gdf1 = trim_overlaps(self.gdf2)
         assert_equal(gdf1.area.values, numpy.array([96.0, 96.0, 8.0]))
 
-        gdf1 = trim_overlaps(self.gdf2, strategy='smallest')
+        gdf1 = trim_overlaps(self.gdf2, strategy="smallest")
         assert_equal(gdf1.area.values, numpy.array([100.0, 100.0, 0.0]))
 
-        gdf = trim_overlaps(self.gdf2, strategy='compact')
+        gdf = trim_overlaps(self.gdf2, strategy="compact")
         assert_equal(gdf1.area.values, numpy.array([100.0, 100.0, 0.0]))
 
     def test_merge_overlaps(self):
@@ -75,11 +78,35 @@ class TestOverlap:
 
         gdf1 = merge_overlaps(self.gdf_str, 10, 0)
         assert_equal(gdf1.area.values, numpy.array([104]))
-        assert_equal(gdf1.index.to_list(), ['foo'])
+        assert_equal(gdf1.index.to_list(), ["foo"])
 
     def test_merge_overlaps_multiple(self):
         gdf1 = merge_overlaps(self.gdf2, 10, 0)
         assert_equal(gdf1.area.values, numpy.array([200]))
+
+    def test_isolate_overlaps(self):
+        gdf = geopandas.GeoDataFrame(
+            {"label": ["large", "small"]}, geometry=[self.p1, self.p2]
+        )
+        split = isolate_overlaps(gdf)
+
+        assert_equal(split.area.values, numpy.array([96.0, 4.0, 4.0]))
+        assert split.loc[2, "label"] == "small"
+        assert not is_overlapping(split)
+
+    def test_isolate_overlaps_values_from_larger(self):
+        gdf = geopandas.GeoDataFrame(
+            {"label": ["large", "small"]}, geometry=[self.p1, self.p2]
+        )
+        split = isolate_overlaps(gdf, values_from="larger")
+
+        assert split.loc[2, "label"] == "large"
+
+    def test_isolate_overlaps_threshold(self):
+        split = isolate_overlaps(self.gdf, min_overlap_area=5)
+
+        assert_equal(split.area.values, numpy.array([100.0, 8.0]))
+        assert is_overlapping(split)
 
 
 class TestTouching:
@@ -104,7 +131,7 @@ class TestTouching:
 
         gdf1 = merge_touching(self.gdf_str, self.index_str, largest=True)
         assert_equal(gdf1.area.values, numpy.array([101, 100, 3.5]))
-        assert_equal(gdf1.index.to_list(), ['foo', 'baz', 'quux'])
+        assert_equal(gdf1.index.to_list(), ["foo", "baz", "quux"])
 
     def test_merge_touching_smallest(self):
         gdf2 = merge_touching(self.gdf, self.index, largest=False)
@@ -112,7 +139,7 @@ class TestTouching:
 
         gdf2 = merge_touching(self.gdf_str, self.index_str, largest=False)
         assert_equal(gdf2.area.values, numpy.array([4.5, 100, 100]))
-        assert_equal(gdf2.index.to_list(), ['foo', 'bar', 'baz'])
+        assert_equal(gdf2.index.to_list(), ["foo", "bar", "baz"])
 
     def test_merge_touching_none(self):
         gdf3 = merge_touching(self.gdf, self.index, largest=None)
@@ -120,4 +147,4 @@ class TestTouching:
 
         gdf3 = merge_touching(self.gdf_str, self.index_str, largest=None)
         assert_equal(gdf3.area.values, numpy.array([4.5, 100, 100]))
-        assert_equal(gdf3.index.to_list(), ['foo', 'bar', 'baz'])
+        assert_equal(gdf3.index.to_list(), ["foo", "bar", "baz"])
