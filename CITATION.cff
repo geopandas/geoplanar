@@ -1,0 +1,27 @@
+cff-version: "1.2.0"
+message: If you use this software, please cite the article below.
+title: GeoPlanar
+authors:
+- family-names: Rey
+  given-names: Sergio
+- family-names: Fleischmann
+  given-names: Martin
+- family-names: Winkler
+  given-names: Lisa
+preferred-citation:
+  type: article
+  title: "GeoPlanar: Planar Enforcement and Coverage Topology Repairing for Python"
+  authors:
+  - family-names: Rey
+    given-names: Sergio
+  - family-names: Fleischmann
+    given-names: Martin
+  - family-names: Winkler
+    given-names: Lisa
+  year: 2026
+  month: 7
+  journal: "Environment and Planning B: Urban Analytics and City Science"
+  start: "23998083261470518"
+  issn: "2399-8083"
+  doi: 10.1177/23998083261470518
+  notes: "Electronic ISSN: 2399-8091"
